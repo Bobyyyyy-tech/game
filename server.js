@@ -9,16 +9,16 @@ const io = new Server(server)
 app.use(express.static("public"))
 
 let players = {}
-let world = {} // key = "x,y,z" -> block type
+let world = {}
 
 function key(x,y,z){ return x+","+y+","+z }
 
-// generate simple terrain once
+// generate terrain
 for(let x=-20;x<20;x++){
     for(let z=-20;z<20;z++){
         let h = Math.floor(Math.sin(x*0.2)*2 + Math.cos(z*0.2)*2 + 5)
         for(let y=0;y<h;y++){
-            world[key(x,y,z)] = y===h-1 ? 1 : 2 // 1 grass, 2 dirt
+            world[key(x,y,z)] = y===h-1 ? 1 : 2
         }
     }
 }
@@ -40,6 +40,7 @@ io.on("connection", socket => {
 
     socket.on("move", data => {
         players[socket.id] = data
+
         socket.broadcast.emit("playerMoved", {
             id: socket.id,
             ...data
@@ -65,4 +66,4 @@ io.on("connection", socket => {
 })
 
 const PORT = process.env.PORT || 3000
-server.listen(PORT, () => console.log("Running " + PORT))
+server.listen(PORT, () => console.log("Running on " + PORT))
