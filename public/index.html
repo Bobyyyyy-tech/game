@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <title>3D Minecraft Multiplayer</title>
 <style>
-body{margin:0;overflow:hidden;background:#000;}
+body { margin:0; overflow:hidden; }
 </style>
 </head>
 <body>
@@ -18,104 +18,84 @@ import { PointerLockControls } from "https://cdn.jsdelivr.net/npm/three@0.158/ex
 
 const socket = io()
 
-// === Scene ===
+// ================= SCENE =================
 const scene = new THREE.Scene()
-scene.fog = new THREE.Fog(0x87ceeb, 20, 80)
+scene.background = new THREE.Color(0x87ceeb)
+scene.fog = new THREE.Fog(0x87ceeb, 20, 100)
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000)
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000)
 
-const renderer = new THREE.WebGLRenderer({antialias:true})
-renderer.setSize(innerWidth, innerHeight)
+// ================= RENDERER =================
+const renderer = new THREE.WebGLRenderer({ antialias:true })
+renderer.setSize(window.innerWidth, window.innerHeight)
 document.body.appendChild(renderer.domElement)
 
+// Resize fix
 window.addEventListener("resize", ()=>{
-    camera.aspect = innerWidth/innerHeight
+    camera.aspect = window.innerWidth/window.innerHeight
     camera.updateProjectionMatrix()
-    renderer.setSize(innerWidth, innerHeight)
+    renderer.setSize(window.innerWidth, window.innerHeight)
 })
 
-// === Light ===
-const light = new THREE.DirectionalLight(0xffffff,1)
+// ================= LIGHT =================
+const light = new THREE.DirectionalLight(0xffffff, 1)
 light.position.set(10,20,10)
 scene.add(light)
 
-// === Controls ===
+const ambient = new THREE.AmbientLight(0xffffff, 0.4)
+scene.add(ambient)
+
+// ================= CONTROLS =================
 const controls = new PointerLockControls(camera, document.body)
 document.addEventListener("click", ()=>controls.lock())
 
-let keys={}
-document.addEventListener("keydown",e=>keys[e.key]=true)
-document.addEventListener("keyup",e=>keys[e.key]=false)
+controls.getObject().position.set(0, 10, 10)
+scene.add(controls.getObject())
 
-// === Blocks ===
+let keys = {}
+document.addEventListener("keydown", e=>keys[e.key]=true)
+document.addEventListener("keyup", e=>keys[e.key]=false)
+
+// ================= MATERIALS =================
 const materials = {
     1: new THREE.MeshLambertMaterial({color:0x55aa33}), // grass
     2: new THREE.MeshLambertMaterial({color:0x8B4513})  // dirt
 }
 
+// ================= WORLD =================
 let blocks = {}
+function key(x,y,z){ return x+","+y+","+z }
+
+function createBlock(x,y,z,type){
+    const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(1,1,1),
+        materials[type]
+    )
+    mesh.position.set(x,y,z)
+    scene.add(mesh)
+    blocks[key(x,y,z)] = mesh
+}
+
+function removeBlock(x,y,z){
+    const k = key(x,y,z)
+    if(blocks[k]){
+        scene.remove(blocks[k])
+        delete blocks[k]
+    }
+}
+
+// ================= TEST CUBE (DEBUG) =================
+const test = new THREE.Mesh(
+    new THREE.BoxGeometry(1,1,1),
+    new THREE.MeshBasicMaterial({color:0xff0000})
+)
+test.position.set(0,5,0)
+scene.add(test)
+
+// ================= PLAYERS =================
 let players = {}
 let myId = null
 
-function k(x,y,z){ return x+","+y+","+z }
-
-// === Create block with face culling ===
-function createBlock(x,y,z,type){
-
-    const geo = new THREE.BoxGeometry(1,1,1)
-    const mesh = new THREE.Mesh(geo, materials[type])
-
-    mesh.position.set(x,y,z)
-    scene.add(mesh)
-
-    blocks[k(x,y,z)] = mesh
-}
-
-// === Remove block ===
-function removeBlock(x,y,z){
-    const key = k(x,y,z)
-    if(blocks[key]){
-        scene.remove(blocks[key])
-        delete blocks[key]
-    }
-}
-
-// === Raycast for breaking ===
-const raycaster = new THREE.Raycaster()
-
-window.addEventListener("mousedown", e=>{
-
-    raycaster.setFromCamera({x:0,y:0}, camera)
-    const intersects = raycaster.intersectObjects(Object.values(blocks))
-
-    if(intersects.length > 0){
-        const p = intersects[0].object.position
-        socket.emit("blockUpdate", {x:p.x,y:p.y,z:p.z,type:0})
-    }
-})
-
-// === Place block ===
-window.addEventListener("contextmenu", e=>{
-    e.preventDefault()
-
-    raycaster.setFromCamera({x:0,y:0}, camera)
-    const intersects = raycaster.intersectObjects(Object.values(blocks))
-
-    if(intersects.length > 0){
-        const hit = intersects[0]
-        const p = hit.object.position
-        const n = hit.face.normal
-
-        socket.emit("blockUpdate", {
-            x: p.x + n.x,
-            y: p.y + n.y,
-            z: p.z + n.z,
-            type:1
-        })
-    }
-})
-
-// === Players ===
 function createPlayer(){
     const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(1,2,1),
@@ -125,15 +105,52 @@ function createPlayer(){
     return mesh
 }
 
-// === Networking ===
+// ================= RAYCAST =================
+const raycaster = new THREE.Raycaster()
+
+window.addEventListener("mousedown", e=>{
+    raycaster.setFromCamera({x:0,y:0}, camera)
+    const hits = raycaster.intersectObjects(Object.values(blocks))
+
+    if(hits.length > 0){
+        const p = hits[0].object.position
+        socket.emit("blockUpdate", {x:p.x,y:p.y,z:p.z,type:0})
+    }
+})
+
+window.addEventListener("contextmenu", e=>{
+    e.preventDefault()
+
+    raycaster.setFromCamera({x:0,y:0}, camera)
+    const hits = raycaster.intersectObjects(Object.values(blocks))
+
+    if(hits.length > 0){
+        const hit = hits[0]
+        const p = hit.object.position
+        const n = hit.face.normal
+
+        socket.emit("blockUpdate", {
+            x: p.x + n.x,
+            y: p.y + n.y,
+            z: p.z + n.z,
+            type: 1
+        })
+    }
+})
+
+// ================= NETWORK =================
 socket.on("init", data=>{
+    console.log("World size:", Object.keys(data.world).length)
+
     myId = data.id
 
-    for(let key in data.world){
-        const [x,y,z] = key.split(",").map(Number)
-        createBlock(x,y,z,data.world[key])
+    // world
+    for(let k in data.world){
+        const [x,y,z] = k.split(",").map(Number)
+        createBlock(x,y,z,data.world[k])
     }
 
+    // players
     for(let id in data.players){
         players[id] = createPlayer()
     }
@@ -157,14 +174,14 @@ socket.on("playerLeft", id=>{
 })
 
 socket.on("blockUpdate", data=>{
-    if(data.type===0){
+    if(data.type === 0){
         removeBlock(data.x,data.y,data.z)
     } else {
         createBlock(data.x,data.y,data.z,data.type)
     }
 })
 
-// === Movement ===
+// ================= MOVEMENT =================
 function update(){
 
     const speed = 0.15
@@ -177,11 +194,15 @@ function update(){
     const pos = controls.getObject().position
 
     if(myId){
-        socket.emit("move", pos)
+        socket.emit("move", {
+            x: pos.x,
+            y: pos.y,
+            z: pos.z
+        })
     }
 }
 
-// === Loop ===
+// ================= LOOP =================
 function animate(){
     requestAnimationFrame(animate)
     update()
