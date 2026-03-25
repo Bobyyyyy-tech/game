@@ -13,30 +13,37 @@ let players = {}
 io.on("connection", socket => {
 
     players[socket.id] = {
-        x: Math.random()*500,
-        y: Math.random()*500
+        x: 0,
+        y: 1.8,
+        z: 0,
+        name: "Player_" + Math.floor(Math.random()*1000)
     }
 
-    socket.emit("currentPlayers", players)
-    socket.broadcast.emit("newPlayer", players[socket.id])
+    socket.emit("init", { id: socket.id, players })
+
+    socket.broadcast.emit("playerJoined", {
+        id: socket.id,
+        player: players[socket.id]
+    })
 
     socket.on("move", data => {
+        if (!players[socket.id]) return
+
         players[socket.id].x = data.x
         players[socket.id].y = data.y
+        players[socket.id].z = data.z
 
-        io.emit("playerMoved", {
+        socket.broadcast.emit("playerMoved", {
             id: socket.id,
-            x: data.x,
-            y: data.y
+            ...players[socket.id]
         })
     })
 
     socket.on("disconnect", () => {
         delete players[socket.id]
-        io.emit("playerDisconnected", socket.id)
+        io.emit("playerLeft", socket.id)
     })
 })
 
-server.listen(3000, () => {
-    console.log("Server running on port 3000")
-})
+const PORT = process.env.PORT || 3000
+server.listen(PORT, () => console.log("Running on " + PORT))
