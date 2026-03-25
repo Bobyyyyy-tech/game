@@ -1,119 +1,42 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>Multiplayer Game</title>
+const express = require("express")
+const http = require("http")
+const { Server } = require("socket.io")
 
-<style>
-body{
-margin:0;
-overflow:hidden;
-background:#222;
-}
+const app = express()
+const server = http.createServer(app)
+const io = new Server(server)
 
-canvas{
-background:#111;
-display:block;
-}
-</style>
-
-</head>
-
-<body>
-
-<canvas id="game"></canvas>
-
-<script src="/socket.io/socket.io.js"></script>
-
-<script>
-
-const socket = io()
-
-const canvas = document.getElementById("game")
-const ctx = canvas.getContext("2d")
-
-canvas.width = window.innerWidth
-canvas.height = window.innerHeight
+app.use(express.static("public"))
 
 let players = {}
 
-let myPlayer = {
-x:200,
-y:200
-}
+io.on("connection", socket => {
 
-const speed = 4
+    players[socket.id] = {
+        x: Math.random()*500,
+        y: Math.random()*500
+    }
 
-let keys = {}
+    socket.emit("currentPlayers", players)
+    socket.broadcast.emit("newPlayer", players[socket.id])
 
-document.addEventListener("keydown", e=>{
-keys[e.key]=true
+    socket.on("move", data => {
+        players[socket.id].x = data.x
+        players[socket.id].y = data.y
+
+        io.emit("playerMoved", {
+            id: socket.id,
+            x: data.x,
+            y: data.y
+        })
+    })
+
+    socket.on("disconnect", () => {
+        delete players[socket.id]
+        io.emit("playerDisconnected", socket.id)
+    })
 })
 
-document.addEventListener("keyup", e=>{
-keys[e.key]=false
+server.listen(3000, () => {
+    console.log("Server running on port 3000")
 })
-
-socket.on("currentPlayers", data=>{
-players=data
-})
-
-socket.on("newPlayer", player=>{
-players[player.id]=player
-})
-
-socket.on("playerMoved", data=>{
-if(players[data.id]){
-players[data.id].x=data.x
-players[data.id].y=data.y
-}
-})
-
-socket.on("playerDisconnected", id=>{
-delete players[id]
-})
-
-function update(){
-
-if(keys["w"]) myPlayer.y-=speed
-if(keys["s"]) myPlayer.y+=speed
-if(keys["a"]) myPlayer.x-=speed
-if(keys["d"]) myPlayer.x+=speed
-
-socket.emit("move", myPlayer)
-
-}
-
-function draw(){
-
-ctx.clearRect(0,0,canvas.width,canvas.height)
-
-for(let id in players){
-
-let p=players[id]
-
-ctx.fillStyle="cyan"
-ctx.fillRect(p.x,p.y,40,40)
-
-}
-
-ctx.fillStyle="red"
-ctx.fillRect(myPlayer.x,myPlayer.y,40,40)
-
-}
-
-function loop(){
-
-update()
-draw()
-
-requestAnimationFrame(loop)
-
-}
-
-loop()
-
-</script>
-
-</body>
-</html>
