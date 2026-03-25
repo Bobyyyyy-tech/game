@@ -1,5 +1,5 @@
 {
-  "name": "3d-multiplayer",
+  "name": "mc-multiplayer",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
