@@ -2,10 +2,9 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>3D Multiplayer</title>
+<title>3D Minecraft Multiplayer</title>
 <style>
-body { margin:0; overflow:hidden; background:#000; }
-canvas { display:block; }
+body{margin:0;overflow:hidden;background:#000;}
 </style>
 </head>
 <body>
@@ -19,115 +18,156 @@ import { PointerLockControls } from "https://cdn.jsdelivr.net/npm/three@0.158/ex
 
 const socket = io()
 
-// Scene
+// === Scene ===
 const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x87ceeb)
+scene.fog = new THREE.Fog(0x87ceeb, 20, 80)
 
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000)
 
-const renderer = new THREE.WebGLRenderer()
+const renderer = new THREE.WebGLRenderer({antialias:true})
 renderer.setSize(innerWidth, innerHeight)
 document.body.appendChild(renderer.domElement)
 
-// Light
-const light = new THREE.DirectionalLight(0xffffff, 1)
-light.position.set(5,10,5)
+window.addEventListener("resize", ()=>{
+    camera.aspect = innerWidth/innerHeight
+    camera.updateProjectionMatrix()
+    renderer.setSize(innerWidth, innerHeight)
+})
+
+// === Light ===
+const light = new THREE.DirectionalLight(0xffffff,1)
+light.position.set(10,20,10)
 scene.add(light)
 
-// Ground
-const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(200,200),
-    new THREE.MeshLambertMaterial({ color: 0x228822 })
-)
-ground.rotation.x = -Math.PI/2
-scene.add(ground)
-
-// Controls
+// === Controls ===
 const controls = new PointerLockControls(camera, document.body)
+document.addEventListener("click", ()=>controls.lock())
 
-document.addEventListener("click", () => controls.lock())
+let keys={}
+document.addEventListener("keydown",e=>keys[e.key]=true)
+document.addEventListener("keyup",e=>keys[e.key]=false)
 
-let velocity = new THREE.Vector3()
-let keys = {}
+// === Blocks ===
+const materials = {
+    1: new THREE.MeshLambertMaterial({color:0x55aa33}), // grass
+    2: new THREE.MeshLambertMaterial({color:0x8B4513})  // dirt
+}
 
-document.addEventListener("keydown", e => keys[e.key]=true)
-document.addEventListener("keyup", e => keys[e.key]=false)
-
-// Players
+let blocks = {}
 let players = {}
 let myId = null
 
-function createPlayerMesh(name){
-    const group = new THREE.Group()
+function k(x,y,z){ return x+","+y+","+z }
 
-    const body = new THREE.Mesh(
-        new THREE.BoxGeometry(1,2,1),
-        new THREE.MeshLambertMaterial({ color: 0x00ffff })
-    )
-    body.position.y = 1
-    group.add(body)
+// === Create block with face culling ===
+function createBlock(x,y,z,type){
 
-    // nametag
-    const canvas = document.createElement("canvas")
-    const ctx = canvas.getContext("2d")
-    canvas.width = 256
-    canvas.height = 64
+    const geo = new THREE.BoxGeometry(1,1,1)
+    const mesh = new THREE.Mesh(geo, materials[type])
 
-    ctx.fillStyle = "white"
-    ctx.font = "30px Arial"
-    ctx.fillText(name, 10,40)
+    mesh.position.set(x,y,z)
+    scene.add(mesh)
 
-    const texture = new THREE.CanvasTexture(canvas)
-    const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: texture })
-    )
-
-    sprite.scale.set(3,1,1)
-    sprite.position.y = 3
-
-    group.add(sprite)
-
-    return group
+    blocks[k(x,y,z)] = mesh
 }
 
-// Networking
-socket.on("init", data => {
+// === Remove block ===
+function removeBlock(x,y,z){
+    const key = k(x,y,z)
+    if(blocks[key]){
+        scene.remove(blocks[key])
+        delete blocks[key]
+    }
+}
+
+// === Raycast for breaking ===
+const raycaster = new THREE.Raycaster()
+
+window.addEventListener("mousedown", e=>{
+
+    raycaster.setFromCamera({x:0,y:0}, camera)
+    const intersects = raycaster.intersectObjects(Object.values(blocks))
+
+    if(intersects.length > 0){
+        const p = intersects[0].object.position
+        socket.emit("blockUpdate", {x:p.x,y:p.y,z:p.z,type:0})
+    }
+})
+
+// === Place block ===
+window.addEventListener("contextmenu", e=>{
+    e.preventDefault()
+
+    raycaster.setFromCamera({x:0,y:0}, camera)
+    const intersects = raycaster.intersectObjects(Object.values(blocks))
+
+    if(intersects.length > 0){
+        const hit = intersects[0]
+        const p = hit.object.position
+        const n = hit.face.normal
+
+        socket.emit("blockUpdate", {
+            x: p.x + n.x,
+            y: p.y + n.y,
+            z: p.z + n.z,
+            type:1
+        })
+    }
+})
+
+// === Players ===
+function createPlayer(){
+    const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(1,2,1),
+        new THREE.MeshBasicMaterial({color:0x00ffff})
+    )
+    scene.add(mesh)
+    return mesh
+}
+
+// === Networking ===
+socket.on("init", data=>{
     myId = data.id
 
+    for(let key in data.world){
+        const [x,y,z] = key.split(",").map(Number)
+        createBlock(x,y,z,data.world[key])
+    }
+
     for(let id in data.players){
-        const p = data.players[id]
-        const mesh = createPlayerMesh(p.name)
-
-        mesh.position.set(p.x, p.y, p.z)
-        scene.add(mesh)
-
-        players[id] = mesh
+        players[id] = createPlayer()
     }
 })
 
-socket.on("playerJoined", data => {
-    const mesh = createPlayerMesh(data.player.name)
-    scene.add(mesh)
-    players[data.id] = mesh
-})
-
-socket.on("playerMoved", data => {
+socket.on("playerMoved", data=>{
     if(players[data.id]){
-        players[data.id].position.set(data.x, data.y, data.z)
+        players[data.id].position.set(data.x,data.y,data.z)
     }
 })
 
-socket.on("playerLeft", id => {
+socket.on("playerJoined", data=>{
+    players[data.id] = createPlayer()
+})
+
+socket.on("playerLeft", id=>{
     if(players[id]){
         scene.remove(players[id])
         delete players[id]
     }
 })
 
-// Movement
+socket.on("blockUpdate", data=>{
+    if(data.type===0){
+        removeBlock(data.x,data.y,data.z)
+    } else {
+        createBlock(data.x,data.y,data.z,data.type)
+    }
+})
+
+// === Movement ===
 function update(){
 
-    const speed = 0.1
+    const speed = 0.15
 
     if(keys["w"]) controls.moveForward(speed)
     if(keys["s"]) controls.moveForward(-speed)
@@ -137,15 +177,11 @@ function update(){
     const pos = controls.getObject().position
 
     if(myId){
-        socket.emit("move", {
-            x: pos.x,
-            y: pos.y,
-            z: pos.z
-        })
+        socket.emit("move", pos)
     }
 }
 
-// Loop
+// === Loop ===
 function animate(){
     requestAnimationFrame(animate)
     update()
@@ -155,6 +191,5 @@ function animate(){
 animate()
 
 </script>
-
 </body>
 </html>
